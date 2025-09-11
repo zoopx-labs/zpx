@@ -1,3 +1,5 @@
+export {};
+
 async function main() {
   // TODO: simulate APY given TVL and epoch schedule
 }

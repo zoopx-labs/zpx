@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach } from 'mocha';
 import { expect } from 'chai';
 import hardhat from 'hardhat';
 const viem = (hardhat as any).viem;

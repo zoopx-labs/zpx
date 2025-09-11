@@ -1,15 +1,16 @@
 import { describe, it, beforeEach } from 'mocha';
 import { expect } from 'chai';
 import { encodeFunctionData } from 'viem';
-import { getViemFixture } from './helpers/viemFixture.js';
+import hardhat from 'hardhat';
+const viem = (hardhat as any).viem;
 
 async function fixtureV2() {
-  const { publicClient, walletClients } = await getViemFixture(6);
-  const [admin, minter, pauser, user1, user2, mockBridge] = walletClients;
-  const ZPXV1 = require('../artifacts/contracts/ZPXV1.sol/ZPXV1.json');
-  const Proxy = require('../artifacts/contracts/LocalERC1967Proxy.sol/LocalERC1967Proxy.json');
+  const publicClient = await viem.getPublicClient();
+  const [admin, minter, pauser, user1, user2, mockBridge] = await viem.getWalletClients();
+  const ZPXV1 = await viem.artifacts.readArtifact('ZPXV1');
+  const Proxy = await viem.artifacts.readArtifact('ERC1967Proxy');
 
-  const implTx = await admin.deployContract({ bytecode: ZPXV1.bytecode });
+  const implTx = await admin.deployContract({ abi: ZPXV1.abi as any, bytecode: ZPXV1.bytecode as any });
   const implRc = await publicClient.waitForTransactionReceipt({ hash: implTx });
   const impl = implRc.contractAddress as `0x${string}`;
 
@@ -17,7 +18,7 @@ async function fixtureV2() {
   const proxyCtor = encodeFunctionData({ abi: Proxy.abi as any, functionName: 'constructor', args: [impl, initCalldata] });
   const proxyBytecode = `${Proxy.bytecode}${proxyCtor.slice(2)}`;
 
-  const proxyTx = await admin.deployContract({ bytecode: proxyBytecode as any });
+  const proxyTx = await admin.deployContract({ abi: Proxy.abi as any, bytecode: proxyBytecode as any });
   const proxyRc = await publicClient.waitForTransactionReceipt({ hash: proxyTx });
   const proxyAddress = proxyRc.contractAddress as `0x${string}`;
 
@@ -39,10 +40,8 @@ describe('ZPXV2 (viem) - upgrade and bridge hooks', function () {
   }
 
   it('admin can upgrade proxy to V2 and address remains the same', async () => {
-  const _conn: any = await network.connect();
-  const { viem } = _conn;
   const ZPXV2 = await viem.artifacts.readArtifact('ZPXV2');
-    const implTx = await ctx.admin.deployContract({ bytecode: ZPXV2.bytecode });
+    const implTx = await ctx.admin.deployContract({ abi: ZPXV2.abi as any, bytecode: ZPXV2.bytecode as any });
     const implRc = await ctx.publicClient.waitForTransactionReceipt({ hash: implTx });
     const implV2 = implRc.contractAddress as `0x${string}`;
 
@@ -54,10 +53,8 @@ describe('ZPXV2 (viem) - upgrade and bridge hooks', function () {
   });
 
   it('bridge hooks work and are role-protected', async () => {
-  const _conn: any = await network.connect();
-  const { viem } = _conn;
   const ZPXV2 = await viem.artifacts.readArtifact('ZPXV2');
-    const implTx = await ctx.admin.deployContract({ bytecode: ZPXV2.bytecode });
+    const implTx = await ctx.admin.deployContract({ abi: ZPXV2.abi as any, bytecode: ZPXV2.bytecode as any });
     const implRc = await ctx.publicClient.waitForTransactionReceipt({ hash: implTx });
     const implV2 = implRc.contractAddress as `0x${string}`;
 
@@ -66,22 +63,22 @@ describe('ZPXV2 (viem) - upgrade and bridge hooks', function () {
   const zpxV2 = await viem.getContractAt('ZPXV2', ctx.proxyAddress);
 
     // configure bridge
-    await ctx.admin.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'upgradeToSuperchainERC20', args: [ctx.mockBridge.address] } as any);
+  await ctx.admin.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'upgradeToSuperchainERC20', args: [ctx.mockBridge.account.address] } as any);
 
     const bridgeAddr = await zpxV2.read.superchainBridge();
-    expect(bridgeAddr).to.equal(ctx.mockBridge.address);
+  expect(bridgeAddr).to.equal(ctx.mockBridge.account.address);
 
     // mint via bridge
-    await ctx.mockBridge.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainMint', args: [ctx.user1.address, BigInt(1000)] } as any);
-    const bal = BigInt(await zpxV2.read.balanceOf([ctx.user1.address]));
+  await ctx.mockBridge.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainMint', args: [ctx.user1.account.address, BigInt(1000)] } as any);
+  const bal = BigInt(await zpxV2.read.balanceOf([ctx.user1.account.address]));
     expect(bal).to.equal(BigInt(1000));
 
     // burn via bridge
-    await ctx.mockBridge.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainBurn', args: [ctx.user1.address, BigInt(400)] } as any);
-    const bal2 = BigInt(await zpxV2.read.balanceOf([ctx.user1.address]));
+  await ctx.mockBridge.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainBurn', args: [ctx.user1.account.address, BigInt(400)] } as any);
+  const bal2 = BigInt(await zpxV2.read.balanceOf([ctx.user1.account.address]));
     expect(bal2).to.equal(BigInt(600));
 
     // non-bridge cannot call
-  await expectRevert(ctx.user2.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainMint', args: [ctx.user2.address, BigInt(1)] } as any));
+  await expectRevert(ctx.user2.writeContract({ address: ctx.proxyAddress, abi: zpxV2.abi as any, functionName: 'crosschainMint', args: [ctx.user2.account.address, BigInt(1)] } as any));
   });
 });

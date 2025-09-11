@@ -1,19 +1,20 @@
 import { describe, it, beforeEach } from 'mocha';
 import { expect } from 'chai';
 import { encodeFunctionData } from 'viem';
-import { getViemFixture } from './helpers/viemFixture.js';
+import hardhat from 'hardhat';
+const viem = (hardhat as any).viem;
 
 const CAP = BigInt('100000000') * BigInt(10) ** BigInt(18);
 
 async function fixture() {
-  // Use external viem clients against a running Hardhat node
-  const { publicClient, walletClients } = await getViemFixture(6);
-  const [admin, minter, pauser, user1, user2, attacker] = walletClients;
-  const ZPXV1 = require('../artifacts/contracts/ZPXV1.sol/ZPXV1.json');
-  const Proxy = require('../artifacts/contracts/LocalERC1967Proxy.sol/LocalERC1967Proxy.json');
+  // Use Hardhat viem runtime
+  const publicClient = await viem.getPublicClient();
+  const [admin, minter, pauser, user1, user2, attacker] = await viem.getWalletClients();
+  const ZPXV1 = await viem.artifacts.readArtifact('ZPXV1');
+  const Proxy = await viem.artifacts.readArtifact('ERC1967Proxy');
 
   // Deploy implementation
-  const implTx = await admin.deployContract({ bytecode: ZPXV1.bytecode });
+  const implTx = await admin.deployContract({ abi: ZPXV1.abi as any, bytecode: ZPXV1.bytecode as any });
   const implReceipt = await publicClient.waitForTransactionReceipt({ hash: implTx });
   const impl = implReceipt.contractAddress as `0x${string}`;
 
@@ -21,7 +22,7 @@ async function fixture() {
   const initCalldata = encodeFunctionData({
     abi: ZPXV1.abi as any,
     functionName: 'initialize',
-    args: [admin.account.address, [minter.account.address], pauser.account.address],
+  args: [admin.account.address, [minter.account.address], pauser.account.address],
   });
 
   // Deploy proxy
@@ -32,7 +33,7 @@ async function fixture() {
   });
   // Some toolchains place constructor payload directly after bytecode
   const proxyBytecode = `${Proxy.bytecode}${proxyCtor.slice(2)}`;
-  const proxyTx = await admin.deployContract({ bytecode: proxyBytecode as any });
+  const proxyTx = await admin.deployContract({ abi: Proxy.abi as any, bytecode: proxyBytecode as any });
   const proxyRc = await publicClient.waitForTransactionReceipt({ hash: proxyTx });
   const proxyAddress = proxyRc.contractAddress as `0x${string}`;
 
@@ -40,7 +41,7 @@ async function fixture() {
     address: proxyAddress,
     abi: ZPXV1.abi,
     read: new Proxy({}, {
-      get(_, fn: string) {
+      get(_: any, fn: string) {
         return (args: any[] = []) => publicClient.readContract({ address: proxyAddress, abi: ZPXV1.abi as any, functionName: fn, args });
       }
     }) as any,
@@ -108,7 +109,7 @@ describe('ZPXV1 (viem) - core behavior', function () {
   describe('Permit (EIP-2612)', () => {
     it('allows permit signed by owner and increments nonce', async () => {
       // mint some tokens to user1 so allowance matters
-      await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.address, BigInt(1000)] } as any);
+  await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.account.address, BigInt(1000)] } as any);
 
       const chainId = Number((await ctx.publicClient.getChainId()));
       const domain = {
@@ -123,18 +124,22 @@ describe('ZPXV1 (viem) - core behavior', function () {
       const value = BigInt(500);
 
       const permit = {
-        owner: ctx.user1.address,
-        spender: ctx.user2.address,
+        owner: ctx.user1.account.address,
+        spender: ctx.user2.account.address,
         value,
         nonce,
         deadline,
       };
 
-      const signature = await ctx.user1.signTypedData({ domain, types: { Permit: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] }, primaryType: 'Permit', message: permit });
+      const sig: `0x${string}` = await ctx.user1.signTypedData({ domain, types: { Permit: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] }, primaryType: 'Permit', message: permit });
+      const rs = sig.slice(2);
+      const r = (`0x${rs.slice(0, 64)}`) as `0x${string}`;
+      const s = (`0x${rs.slice(64, 128)}`) as `0x${string}`;
+      const v = Number.parseInt(rs.slice(128, 130), 16);
 
-  await ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'permit', args: [ctx.user1.address, ctx.user2.address, value, deadline, signature.v, signature.r, signature.s] } as any);
+  await ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'permit', args: [ctx.user1.account.address, ctx.user2.account.address, value, deadline, v, r, s] } as any);
 
-  const allowance = BigInt(await ctx.contract.read.allowance([ctx.user1.address, ctx.user2.address]));
+  const allowance = BigInt(await ctx.contract.read.allowance([ctx.user1.account.address, ctx.user2.account.address]));
   expect(allowance).to.equal(value);
 
   const newNonce = BigInt(await ctx.contract.read.nonces([ctx.user1.address]));
@@ -143,22 +148,26 @@ describe('ZPXV1 (viem) - core behavior', function () {
 
     it('rejects expired permit', async () => {
       const chainId = Number((await ctx.publicClient.getChainId()));
-      const domain = { name: 'ZoopX', version: '1', chainId, verifyingContract: ctx.proxyAddress } as const;
-      const nonce = await ctx.contract.read.nonces([ctx.user1.address]);
+    const domain = { name: 'ZoopX', version: '1', chainId, verifyingContract: ctx.proxyAddress } as const;
+    const nonce = await ctx.contract.read.nonces([ctx.user1.account.address]);
       const deadline = BigInt(Math.floor(Date.now() / 1000) - 10);
       const value = BigInt(1);
 
-      const permit = { owner: ctx.user1.address, spender: ctx.user2.address, value, nonce, deadline };
-      const signature = await ctx.user1.signTypedData({ domain, types: { Permit: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] }, primaryType: 'Permit', message: permit });
+    const permit = { owner: ctx.user1.account.address, spender: ctx.user2.account.address, value, nonce, deadline };
+    const sig: `0x${string}` = await ctx.user1.signTypedData({ domain, types: { Permit: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] }, primaryType: 'Permit', message: permit });
+    const rs = sig.slice(2);
+    const r = (`0x${rs.slice(0, 64)}`) as `0x${string}`;
+    const s = (`0x${rs.slice(64, 128)}`) as `0x${string}`;
+    const v = Number.parseInt(rs.slice(128, 130), 16);
 
-  await expectRevert(ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'permit', args: [ctx.user1.address, ctx.user2.address, value, deadline, signature.v, signature.r, signature.s] } as any));
+  await expectRevert(ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'permit', args: [ctx.user1.account.address, ctx.user2.account.address, value, deadline, v, r, s] } as any));
     });
   });
 
   describe('Minting & Cap', () => {
     it('minter can mint and cap enforced', async () => {
       const before = BigInt(await ctx.contract.read.totalSupply());
-      await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.address, BigInt(1000)] } as any);
+  await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.account.address, BigInt(1000)] } as any);
       const after = BigInt(await ctx.contract.read.totalSupply());
       expect(after).to.equal(before + BigInt(1000));
 
@@ -170,21 +179,21 @@ describe('ZPXV1 (viem) - core behavior', function () {
       expect(cap).to.equal(CAP);
 
       // try to exceed cap
-      const supply = BigInt(await ctx.contract.read.totalSupply());
+    const supply = BigInt(await ctx.contract.read.totalSupply());
       const toMint = cap - supply + BigInt(1);
-  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user2.address, toMint] } as any));
+  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user2.account.address, toMint] } as any));
     });
 
     it('mintBatch atomic and validation', async () => {
       // valid batch
-      await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mintBatch', args: [[ctx.user1.address, ctx.user2.address], [BigInt(10), BigInt(20)]] } as any);
-  const b1 = BigInt(await ctx.contract.read.balanceOf([ctx.user1.address]));
-  const b2 = BigInt(await ctx.contract.read.balanceOf([ctx.user2.address]));
+    await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mintBatch', args: [[ctx.user1.account.address, ctx.user2.account.address], [BigInt(10), BigInt(20)]] } as any);
+  const b1 = BigInt(await ctx.contract.read.balanceOf([ctx.user1.account.address]));
+  const b2 = BigInt(await ctx.contract.read.balanceOf([ctx.user2.account.address]));
   expect(b1 >= BigInt(10)).to.be.true;
   expect(b2 >= BigInt(20)).to.be.true;
 
       // length mismatch
-  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mintBatch', args: [[ctx.user1.address], [BigInt(1), BigInt(2)]] } as any));
+  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mintBatch', args: [[ctx.user1.account.address], [BigInt(1), BigInt(2)]] } as any));
 
       // address zero in recipients
   await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mintBatch', args: [['0x0000000000000000000000000000000000000000'], [BigInt(1)]] } as any));
@@ -193,44 +202,42 @@ describe('ZPXV1 (viem) - core behavior', function () {
 
   describe('Burning', () => {
     it('burn and burnFrom behave correctly', async () => {
-      await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.address, BigInt(1000)] } as any);
-      await ctx.user1.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'approve', args: [ctx.user2.address, BigInt(500)] } as any);
-      await ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'burnFrom', args: [ctx.user1.address, BigInt(200)] } as any);
-      const bal = BigInt(await ctx.contract.read.balanceOf([ctx.user1.address]));
+  await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.account.address, BigInt(1000)] } as any);
+  await ctx.user1.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'approve', args: [ctx.user2.account.address, BigInt(500)] } as any);
+  await ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'burnFrom', args: [ctx.user1.account.address, BigInt(200)] } as any);
+  const bal = BigInt(await ctx.contract.read.balanceOf([ctx.user1.account.address]));
       expect(bal).to.equal(BigInt(800));
 
       // insufficient allowance
-  await expectRevert(ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'burnFrom', args: [ctx.user1.address, BigInt(1000)] } as any));
+  await expectRevert(ctx.user2.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'burnFrom', args: [ctx.user1.account.address, BigInt(1000)] } as any));
     });
   });
 
   describe('Pause', () => {
     it('pauser can pause/unpause and actions blocked when paused', async () => {
-      await ctx.pauser.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'pause', args: [] } as any);
+  await ctx.pauser.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'pause', args: [] } as any);
       // transfer should revert
-  await expectRevert(ctx.user1.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'transfer', args: [ctx.user2.address, BigInt(1)] } as any));
+  await expectRevert(ctx.user1.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'transfer', args: [ctx.user2.account.address, BigInt(1)] } as any));
       // mint should revert
-  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.address, BigInt(1)] } as any));
+  await expectRevert(ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.account.address, BigInt(1)] } as any));
 
-      await ctx.pauser.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'unpause', args: [] } as any);
+  await ctx.pauser.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'unpause', args: [] } as any);
       // now succeed
-      await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.address, BigInt(1)] } as any);
+  await ctx.minter.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'mint', args: [ctx.user1.account.address, BigInt(1)] } as any);
     });
   });
 
   describe('Rescue', () => {
     it('admin can rescue other ERC20s but not ZPX', async () => {
-    // deploy a mock ERC20
-    const _conn: any = await network.connect();
-    const { viem } = _conn;
-    const Mock = await viem.artifacts.readArtifact('MockERC20');
-    const tx = await ctx.admin.deployContract({ bytecode: Mock.bytecode, args: [] as any });
+  // deploy a mock ERC20
+  const Mock = await viem.artifacts.readArtifact('MockERC20');
+  const tx = await ctx.admin.deployContract({ abi: Mock.abi as any, bytecode: Mock.bytecode as any, args: [] as any });
       const rc = await ctx.publicClient.waitForTransactionReceipt({ hash: tx });
       const mockAddr = rc.contractAddress as `0x${string}`;
 
       // transfer some mock to proxy and rescue
       // ... skip detailed token interactions for brevity, assert rescue call exists and reverts for ZPX
-  await expectRevert(ctx.admin.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'rescueERC20', args: [mockAddr, ctx.user1.address] } as any));
+  await expectRevert(ctx.admin.writeContract({ address: ctx.contract.address, abi: ctx.contract.abi as any, functionName: 'rescueERC20', args: [mockAddr, ctx.user1.account.address] } as any));
     });
   });
 });

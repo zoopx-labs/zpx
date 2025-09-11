@@ -1,3 +1,5 @@
+export {};
+
 async function main() {
   // TODO: Upgrade proxy to ZPXV2 and run one-time initializer
 }

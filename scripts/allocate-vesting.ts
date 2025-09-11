@@ -1,3 +1,5 @@
+export {};
+
 async function main() {
   // TODO: Deploy vesting escrows per allocation table and fund them
 }

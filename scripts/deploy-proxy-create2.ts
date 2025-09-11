@@ -2,6 +2,7 @@ import hre from 'hardhat';
 import { createPublicClient, createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { encodeFunctionData, encodeAbiParameters, keccak256 } from 'viem';
+import { TextEncoder } from 'util';
 
 async function main() {
   // Env / config
