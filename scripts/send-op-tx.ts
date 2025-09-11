@@ -1,9 +1,10 @@
 import { network } from "hardhat";
 
-const { viem } = await network.connect({
+const _conn: any = await network.connect({
   network: "hardhatOp",
   chainType: "op",
 });
+const { viem } = _conn;
 
 console.log("Sending transaction using the OP chain type");
 

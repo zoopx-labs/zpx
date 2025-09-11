@@ -1,42 +1,29 @@
+import "dotenv/config";
+import "ts-node/register/transpile-only";
+import "tsconfig-paths/register";
 import type { HardhatUserConfig } from "hardhat/config";
-
-import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
-import { configVariable } from "hardhat/config";
+import "@nomicfoundation/hardhat-toolbox-viem";
 
 const config: HardhatUserConfig = {
-  plugins: [hardhatToolboxViemPlugin],
   solidity: {
-    profiles: {
-      default: {
-        version: "0.8.28",
-      },
-      production: {
-        version: "0.8.28",
-        settings: {
-          optimizer: {
-            enabled: true,
-            runs: 200,
-          },
-        },
-      },
-    },
+    version: "0.8.28",
+    settings: { optimizer: { enabled: true, runs: 200 } },
   },
   networks: {
-    hardhatMainnet: {
-      type: "edr-simulated",
-      chainType: "l1",
-    },
-    hardhatOp: {
-      type: "edr-simulated",
-      chainType: "op",
-    },
+    hardhat: { chainId: 31337 },
     sepolia: {
-      type: "http",
-      chainType: "l1",
-      url: configVariable("SEPOLIA_RPC_URL"),
-      accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+      url: process.env.RPC_SEPOLIA || "",
+      accounts: process.env.DEPLOYER_MNEMONIC
+        ? {
+            mnemonic: process.env.DEPLOYER_MNEMONIC,
+            path: "m/44'/60'/0'/0",
+            initialIndex: 0,
+            count: 10,
+          }
+        : [],
     },
   },
+  mocha: { timeout: 200000 },
 };
 
 export default config;

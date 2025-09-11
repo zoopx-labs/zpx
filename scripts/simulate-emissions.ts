@@ -1,5 +1,3 @@
-import { ethers } from "hardhat";
-
 async function main() {
   // TODO: simulate APY given TVL and epoch schedule
 }

@@ -1,17 +1,16 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach } from 'mocha';
 import { expect } from 'chai';
-import hardhat from 'hardhat';
-const viem = (hardhat as any).viem;
+import { encodeFunctionData } from 'viem';
+import { getViemFixture } from './helpers/viemFixture.js';
 
 const CAP = BigInt('100000000') * BigInt(10) ** BigInt(18);
 
 async function fixture() {
-  const publicClient = await viem.getPublicClient();
-  const walletClients = await viem.getWalletClients();
+  // Use external viem clients against a running Hardhat node
+  const { publicClient, walletClients } = await getViemFixture(6);
   const [admin, minter, pauser, user1, user2, attacker] = walletClients;
-
-  const ZPXV1 = await viem.artifacts.readArtifact('ZPXV1');
-  const Proxy = await viem.artifacts.readArtifact('ERC1967Proxy');
+  const ZPXV1 = require('../artifacts/contracts/ZPXV1.sol/ZPXV1.json');
+  const Proxy = require('../artifacts/contracts/LocalERC1967Proxy.sol/LocalERC1967Proxy.json');
 
   // Deploy implementation
   const implTx = await admin.deployContract({ bytecode: ZPXV1.bytecode });
@@ -19,14 +18,14 @@ async function fixture() {
   const impl = implReceipt.contractAddress as `0x${string}`;
 
   // Build initializer calldata
-  const initCalldata = viem.encodeFunctionData({
+  const initCalldata = encodeFunctionData({
     abi: ZPXV1.abi as any,
     functionName: 'initialize',
-    args: [admin.address, [minter.address], pauser.address],
+    args: [admin.account.address, [minter.account.address], pauser.account.address],
   });
 
   // Deploy proxy
-  const proxyCtor = viem.encodeFunctionData({
+  const proxyCtor = encodeFunctionData({
     abi: Proxy.abi as any,
     functionName: 'constructor',
     args: [impl, initCalldata],
@@ -37,7 +36,15 @@ async function fixture() {
   const proxyRc = await publicClient.waitForTransactionReceipt({ hash: proxyTx });
   const proxyAddress = proxyRc.contractAddress as `0x${string}`;
 
-  const contract = await viem.getContractAt('ZPXV1', proxyAddress);
+  const contract = {
+    address: proxyAddress,
+    abi: ZPXV1.abi,
+    read: new Proxy({}, {
+      get(_, fn: string) {
+        return (args: any[] = []) => publicClient.readContract({ address: proxyAddress, abi: ZPXV1.abi as any, functionName: fn, args });
+      }
+    }) as any,
+  };
 
   return { publicClient, contract, impl, proxyAddress, admin, minter, pauser, user1, user2, attacker };
 }
@@ -213,9 +220,11 @@ describe('ZPXV1 (viem) - core behavior', function () {
 
   describe('Rescue', () => {
     it('admin can rescue other ERC20s but not ZPX', async () => {
-      // deploy a mock ERC20
-      const Mock = await viem.artifacts.readArtifact('MockERC20');
-      const tx = await ctx.admin.deployContract({ bytecode: Mock.bytecode, args: [] as any });
+    // deploy a mock ERC20
+    const _conn: any = await network.connect();
+    const { viem } = _conn;
+    const Mock = await viem.artifacts.readArtifact('MockERC20');
+    const tx = await ctx.admin.deployContract({ bytecode: Mock.bytecode, args: [] as any });
       const rc = await ctx.publicClient.waitForTransactionReceipt({ hash: tx });
       const mockAddr = rc.contractAddress as `0x${string}`;
 

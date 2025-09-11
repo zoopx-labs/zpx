@@ -1,5 +1,3 @@
-import { ethers } from "hardhat";
-
 async function main() {
   // TODO: Deploy vesting escrows per allocation table and fund them
 }
