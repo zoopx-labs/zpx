@@ -2,6 +2,9 @@
 node_modules/
 
 # Environment
+out
+foundry-cache
+cache-grind
 .env
 
 # Hardhat artifacts & cache
