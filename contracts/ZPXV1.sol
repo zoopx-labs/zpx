@@ -41,6 +41,10 @@ contract ZPXV1 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, Acces
 
     /// @notice Thrown when a zero address is provided where not allowed
     error ZeroAddress();
+    /// @notice Thrown when parallel array arguments differ in length
+    error LengthMismatch();
+    /// @notice Thrown when attempting to rescue the token itself
+    error CannotRescueSelf();
 
     // ===== Initializer =====
 
@@ -107,7 +111,7 @@ contract ZPXV1 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, Acces
      */
     function mintBatch(address[] calldata tos, uint256[] calldata amounts) external onlyRole(MINTER_ROLE) whenNotPaused {
         uint256 len = tos.length;
-        if (len != amounts.length) revert();
+        if (len != amounts.length) revert LengthMismatch();
 
         // Calculate total first to validate cap in one check
         uint256 totalToMint = 0;
@@ -169,8 +173,9 @@ contract ZPXV1 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, Acces
      * @dev Override {_update} from ERC20Upgradeable to enforce pause checks on transfers, mints and burns.
      */
     function _update(address from, address to, uint256 amount) internal override {
-        // Prevent operations while paused
-        if (paused()) revert("ZPX: paused");
+        // Leverage PausableUpgradeable's logic by calling parent which enforces pause in modifiers.
+        // _update itself does not have whenNotPaused, so we rely on modifiers on external funcs plus this guard.
+        if (paused()) revert PausableUpgradeable.EnforcedPause();
         super._update(from, to, amount);
     }
 
@@ -193,7 +198,7 @@ contract ZPXV1 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, Acces
      * @param amount Amount to rescue
      */
     function rescueERC20(address token, address to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (token == address(this)) revert();
+        if (token == address(this)) revert CannotRescueSelf();
         if (to == address(0)) revert ZeroAddress();
         IERC20(token).safeTransfer(to, amount);
     }

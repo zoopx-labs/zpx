@@ -1,15 +1,17 @@
 [profile.default]
 src = 'contracts'
+test = 'test-foundry'
 out = 'out'
 libs = ['lib', 'node_modules']
 remappings = [
   '@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/',
-  '@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/'
+  '@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/',
+  'forge-std/=lib/forge-std/src/'
 ]
 solc_version = '0.8.28'
 optimizer = true
 optimizer_runs = 200
-evvm_version = 'paris'
+evm_version = 'paris'
 ffi = true
 
 [fmt]

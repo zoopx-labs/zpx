@@ -9,12 +9,14 @@ contract PermitFuzz is BaseZPXTest {
     bytes32 private DOMAIN_SEPARATOR;
 
     function setUp() public {
-        deployV1(1_000_000 ether);
+        deployV1(0);
         DOMAIN_SEPARATOR = token.DOMAIN_SEPARATOR();
     }
 
     function testFuzzPermit(uint256 privateKey, uint256 value, uint256 deadlineOffset) public {
-        privateKey = bound(privateKey, 1, type(uint256).max - 1);
+    // secp256k1 curve order n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+    uint256 n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+    privateKey = bound(privateKey, 1, n - 1);
         address owner = vm.addr(privateKey);
         value = bound(value, 0, 1_000_000 ether);
         uint256 nonce = token.nonces(owner);

@@ -43,4 +43,11 @@ contract ZPXInvariants is StdInvariant, BaseZPXTest {
         // Simple sanity: handler balance <= cap
         assertLe(token.balanceOf(address(handler)), cap);
     }
+
+    // (Informational) If in future we integrate registry into invariant harness, assert its arithmetic identity
+    // function invariant_RegistryTotalSupplyIdentity() public {
+    //     if (address(registry) != address(0)) {
+    //         assertEq(registry.totalMarketSupply(), registry.nativeCirculating() + registry.remoteRecognized());
+    //     }
+    // }
 }
